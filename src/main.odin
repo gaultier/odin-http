@@ -75,7 +75,7 @@ main :: proc() {
 		if err_kevent != .NONE {
 			log.panicf("failed to kevent(2) %v", err_kevent)
 		}
-		assert(n_events == 1)
+		assert(n_events == 0)
 	}
 
 	event_list := make([]kqueue.KEvent, MAX_CONCURRENT_CONNECTIONS)
@@ -87,10 +87,12 @@ main :: proc() {
 		}
 
 		for event in event_list[:n_events] {
+			event_fd := net.TCP_Socket(event.ident)
+
 			if .EOF in event.flags { 	// Disconnect
 				log.debug("client disconnected")
-				net.close(net.TCP_Socket(event.ident))
-			} else if net.TCP_Socket(event.ident) == socket_server { 	// New client.
+				net.close(event_fd)
+			} else if event_fd == socket_server { 	// New client.
 				socket_client, endpoint_client, err_accept := net.accept_tcp(socket_server)
 				if err_accept != nil {
 					log.panicf("failed to accept(2) %v", err_accept)
@@ -100,7 +102,16 @@ main :: proc() {
 				log.debugf("new connection %v", endpoint_client)
 			} else if kqueue.Filter.Read == event.filter {
 				log.debugf("something to read")
-				// TODO
+				buf := [1024]u8{}
+				n_recv, err_recv := net.recv_tcp(event_fd, buf[:])
+				if err_recv != nil {
+					log.errorf("failed to recv(2) %v", err_recv)
+					net.close(event_fd)
+					continue
+				}
+				log.debugf("read %d %v", n_recv, buf[:n_recv])
+			} else {
+				log.debugf("unknown event %v", event)
 			}
 		}
 	}

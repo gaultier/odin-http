@@ -5,6 +5,7 @@ import "core:mem"
 import "core:mem/virtual"
 import "core:net"
 import "core:os"
+import "core:strings"
 import "core:sys/kqueue"
 import "core:time"
 
@@ -49,7 +50,8 @@ main :: proc() {
 	}
 	context.temp_allocator = virtual.arena_allocator(&tmp_arena)
 
-	log_level_str := os.get_env("ODIN_LOG_LEVEL")
+	context.logger = log.create_console_logger(.Error)
+	log_level_str := strings.trim_space(os.get_env("ODIN_LOG_LEVEL"))
 	switch log_level_str {
 	case "debug":
 		context.logger = log.create_console_logger(.Debug)
@@ -61,8 +63,13 @@ main :: proc() {
 		context.logger = log.create_console_logger(.Warning)
 	case "fatal":
 		context.logger = log.create_console_logger(.Fatal)
+	case "":
+		context.logger = log.create_console_logger(.Error)
 	case:
-		log.panic("invalid log level in the environment variable ODIN_LOG_LEVEL", log_level_str)
+		log.panicf(
+			"invalid log level in the environment variable ODIN_LOG_LEVEL `%s`",
+			log_level_str,
+		)
 	}
 
 
@@ -108,10 +115,6 @@ main :: proc() {
 			log.panicf("failed to kevent(2) %v", err_kevent)
 		}
 		log.debug("events", n_events)
-
-		if n_events == 0 {
-			time.sleep(10 * time.Millisecond)
-		}
 
 		for event in event_list[:n_events] {
 			event_fd := net.TCP_Socket(event.ident)

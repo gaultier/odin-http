@@ -8,13 +8,15 @@ import "core:sys/kqueue"
 
 MAX_CONCURRENT_CONNECTIONS :: 16384
 
-register_new_client :: proc(events: ^[dynamic]kqueue.KEvent) {
-	event_read := kqueue.KEvent {
-		.ident  = socket,
-		.filter = .Read,
-		.flags  = {.Add},
+register_new_client :: proc(queue: kqueue.KQ, socket_client: net.TCP_Socket) {
+	change_list := [1]kqueue.KEvent {
+		{ident = uintptr(socket_client), filter = .Read, flags = {.Add}},
 	}
-	append(&events, event_read)
+	n_events, err_kevent := kqueue.kevent(queue, change_list[:], nil, nil)
+	if err_kevent != .NONE {
+		log.panicf("failed to kevent(2) %v", err_kevent)
+	}
+	assert(n_events == 1)
 }
 
 main :: proc() {
@@ -54,6 +56,7 @@ main :: proc() {
 	}
 
 
+	// TODO: Make the socket non blocking?
 	socket_server, err_listen := net.listen_tcp(endpoint_server, MAX_CONCURRENT_CONNECTIONS)
 	if err_listen != nil {
 		log.panicf("failed to socket(2) %v", err_listen)
@@ -64,15 +67,41 @@ main :: proc() {
 		log.panicf("failed to kqueue(2) %v", err)
 	}
 
-	// TODO: How many events per client?
-	events := make([dynamic]kqueue.KEvent, 0, MAX_CONCURRENT_CONNECTIONS)
-	for {
-		socket_client, endpoint_client, err_accept := net.accept_tcp(socket_server)
-		if err_accept != nil {
-			log.panicf("failed to accept(2) %v", err_accept)
+	{
+		change_list := [1]kqueue.KEvent {
+			{ident = uintptr(socket_server), filter = .Read, flags = {.Add}},
 		}
-		log.debugf("new connection %v", endpoint_client)
+		n_events, err_kevent := kqueue.kevent(queue, change_list[:], nil, nil)
+		if err_kevent != .NONE {
+			log.panicf("failed to kevent(2) %v", err_kevent)
+		}
+		assert(n_events == 1)
+	}
 
-		register_new_client(&events)
+	event_list := make([]kqueue.KEvent, MAX_CONCURRENT_CONNECTIONS)
+
+	for {
+		n_events, err_kevent := kqueue.kevent(queue, nil, event_list[:], nil)
+		if err_kevent != .NONE {
+			log.panicf("failed to kevent(2) %v", err_kevent)
+		}
+
+		for event in event_list[:n_events] {
+			if .EOF in event.flags { 	// Disconnect
+				log.debug("client disconnected")
+				net.close(net.TCP_Socket(event.ident))
+			} else if net.TCP_Socket(event.ident) == socket_server { 	// New client.
+				socket_client, endpoint_client, err_accept := net.accept_tcp(socket_server)
+				if err_accept != nil {
+					log.panicf("failed to accept(2) %v", err_accept)
+				}
+
+				register_new_client(queue, socket_client)
+				log.debugf("new connection %v", endpoint_client)
+			} else if kqueue.Filter.Read == event.filter {
+				log.debugf("something to read")
+				// TODO
+			}
+		}
 	}
 }

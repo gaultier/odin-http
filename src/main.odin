@@ -8,6 +8,15 @@ import "core:sys/kqueue"
 
 MAX_CONCURRENT_CONNECTIONS :: 16384
 
+register_new_client :: proc(events: ^[dynamic]kqueue.KEvent) {
+	event_read := kqueue.KEvent {
+		.ident  = socket,
+		.filter = .Read,
+		.flags  = {.Add},
+	}
+	append(&events, event_read)
+}
+
 main :: proc() {
 	context.logger = log.create_console_logger()
 
@@ -50,29 +59,20 @@ main :: proc() {
 		log.panicf("failed to socket(2) %v", err_listen)
 	}
 
+	queue, err := kqueue.kqueue()
+	if err != .NONE {
+		log.panicf("failed to kqueue(2) %v", err)
+	}
+
+	// TODO: How many events per client?
+	events := make([dynamic]kqueue.KEvent, 0, MAX_CONCURRENT_CONNECTIONS)
 	for {
 		socket_client, endpoint_client, err_accept := net.accept_tcp(socket_server)
 		if err_accept != nil {
 			log.panicf("failed to accept(2) %v", err_accept)
 		}
 		log.debugf("new connection %v", endpoint_client)
+
+		register_new_client(&events)
 	}
-
-	// queue, err := kqueue()
-	// if err != .NONE {
-	// 	log.panicf("failed to kqueue(2) %v", err)
-	// }
-
-
-	// accept_events := make([]kqueue.KEvent, MAX_CONCURRENT_CONNECTIONS)
-	// for &event in accept_events {
-	// 	event = kqueue.KEvent {
-	// 		.ident  = socket,
-	// 		.filter = .Read,
-	// 		.flags  = {.Add},
-	// 	}
-	// }
-	// for {
-
-	// }
 }

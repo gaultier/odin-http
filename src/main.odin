@@ -9,10 +9,9 @@ import "core:sys/kqueue"
 MAX_CONCURRENT_CONNECTIONS :: 16384
 
 main :: proc() {
-	logger := log.create_console_logger()
+	context.logger = log.create_console_logger()
 
 	arena: virtual.Arena
-
 	{
 		arena_size := uint(1) * mem.Megabyte
 		mmaped, err := virtual.reserve_and_commit(arena_size)
@@ -40,15 +39,23 @@ main :: proc() {
 	context.temp_allocator = virtual.arena_allocator(&tmp_arena)
 
 
-	endpoint := net.Endpoint {
+	endpoint_server := net.Endpoint {
 		address = net.IP4_Address{0, 0, 0, 0},
 		port    = 12345,
 	}
 
 
-	socket, err := net.listen_tcp(endpoint, MAX_CONCURRENT_CONNECTIONS)
-	if err != nil {
-		log.panicf("failed to socket(2) %v", err)
+	socket_server, err_listen := net.listen_tcp(endpoint_server, MAX_CONCURRENT_CONNECTIONS)
+	if err_listen != nil {
+		log.panicf("failed to socket(2) %v", err_listen)
+	}
+
+	for {
+		socket_client, endpoint_client, err_accept := net.accept_tcp(socket_server)
+		if err_accept != nil {
+			log.panicf("failed to accept(2) %v", err_accept)
+		}
+		log.debugf("new connection %v", endpoint_client)
 	}
 
 	// queue, err := kqueue()

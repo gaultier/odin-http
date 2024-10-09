@@ -1,5 +1,71 @@
-#+build freebsd
 package main
 
+import "core:log"
+import "core:mem"
+import "core:mem/virtual"
+import "core:net"
+import "core:sys/kqueue"
+
+MAX_CONCURRENT_CONNECTIONS :: 16384
+
 main :: proc() {
+	logger := log.create_console_logger()
+
+	arena: virtual.Arena
+
+	{
+		arena_size := uint(1) * mem.Megabyte
+		mmaped, err := virtual.reserve_and_commit(arena_size)
+		if err != nil {
+			log.panicf("failed to mmap %v", err)
+		}
+		if err = virtual.arena_init_buffer(&arena, mmaped); err != nil {
+			log.panicf("failed to create main arena %v", err)
+		}
+	}
+	context.allocator = virtual.arena_allocator(&arena)
+
+
+	tmp_arena: virtual.Arena
+	{
+		tmp_arena_size := uint(1) * mem.Megabyte
+		tmp_mmaped, err := virtual.reserve_and_commit(tmp_arena_size)
+		if err != nil {
+			log.panicf("failed to create mmap %v", err)
+		}
+		if err = virtual.arena_init_buffer(&tmp_arena, tmp_mmaped); err != nil {
+			log.panicf("failed to create temp arena %v", err)
+		}
+	}
+	context.temp_allocator = virtual.arena_allocator(&tmp_arena)
+
+
+	endpoint := net.Endpoint {
+		address = net.IP4_Address{0, 0, 0, 0},
+		port    = 12345,
+	}
+
+
+	socket, err := net.listen_tcp(endpoint, MAX_CONCURRENT_CONNECTIONS)
+	if err != nil {
+		log.panicf("failed to socket(2) %v", err)
+	}
+
+	// queue, err := kqueue()
+	// if err != .NONE {
+	// 	log.panicf("failed to kqueue(2) %v", err)
+	// }
+
+
+	// accept_events := make([]kqueue.KEvent, MAX_CONCURRENT_CONNECTIONS)
+	// for &event in accept_events {
+	// 	event = kqueue.KEvent {
+	// 		.ident  = socket,
+	// 		.filter = .Read,
+	// 		.flags  = {.Add},
+	// 	}
+	// }
+	// for {
+
+	// }
 }

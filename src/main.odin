@@ -4,7 +4,9 @@ import "core:log"
 import "core:mem"
 import "core:mem/virtual"
 import "core:net"
+import "core:os"
 import "core:sys/kqueue"
+import "core:time"
 
 MAX_CONCURRENT_CONNECTIONS :: 16384
 
@@ -20,8 +22,6 @@ register_new_client :: proc(queue: kqueue.KQ, socket_client: net.TCP_Socket) {
 }
 
 main :: proc() {
-	context.logger = log.create_console_logger()
-
 	arena: virtual.Arena
 	{
 		arena_size := uint(1) * mem.Megabyte
@@ -49,6 +49,22 @@ main :: proc() {
 	}
 	context.temp_allocator = virtual.arena_allocator(&tmp_arena)
 
+	log_level_str := os.get_env("ODIN_LOG_LEVEL")
+	switch log_level_str {
+	case "debug":
+		context.logger = log.create_console_logger(.Debug)
+	case "info":
+		context.logger = log.create_console_logger(.Info)
+	case "error":
+		context.logger = log.create_console_logger(.Error)
+	case "warning":
+		context.logger = log.create_console_logger(.Warning)
+	case "fatal":
+		context.logger = log.create_console_logger(.Fatal)
+	case:
+		log.panic("invalid log level in the environment variable ODIN_LOG_LEVEL", log_level_str)
+	}
+
 
 	endpoint_server := net.Endpoint {
 		address = net.IP4_Address{0, 0, 0, 0},
@@ -59,7 +75,7 @@ main :: proc() {
 	// TODO: Make the socket non blocking?
 	socket_server, err_listen := net.listen_tcp(endpoint_server, MAX_CONCURRENT_CONNECTIONS)
 	if err_listen != nil {
-		log.panicf("failed to socket(2) %v", err_listen)
+		log.panicf("failed to listen %v", err_listen)
 	}
 
 	queue, err := kqueue.kqueue()
@@ -69,7 +85,13 @@ main :: proc() {
 
 	{
 		change_list := [1]kqueue.KEvent {
-			{ident = uintptr(socket_server), filter = .Read, flags = {.Add}},
+			{
+				ident  = uintptr(socket_server),
+				filter = .Read,
+				flags  = {.Add},
+				// Backlog.
+				data   = MAX_CONCURRENT_CONNECTIONS,
+			},
 		}
 		n_events, err_kevent := kqueue.kevent(queue, change_list[:], nil, nil)
 		if err_kevent != .NONE {
@@ -85,11 +107,19 @@ main :: proc() {
 		if err_kevent != .NONE {
 			log.panicf("failed to kevent(2) %v", err_kevent)
 		}
+		log.debug("events", n_events)
+
+		if n_events == 0 {
+			time.sleep(10 * time.Millisecond)
+		}
 
 		for event in event_list[:n_events] {
 			event_fd := net.TCP_Socket(event.ident)
 
-			if .EOF in event.flags { 	// Disconnect
+			if .Error in event.flags { 	// Error.
+				log.errorf("error %d", event.data)
+				continue
+			} else if .EOF in event.flags { 	// Disconnect
 				log.debug("client disconnected")
 				net.close(event_fd)
 			} else if event_fd == socket_server { 	// New client.

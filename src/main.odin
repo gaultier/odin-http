@@ -129,6 +129,32 @@ spawn_client_process :: proc(socket_client: net.TCP_Socket) {
 	os.exit(0)
 }
 
+make_logger_from_env :: proc(env_level: string) -> log.Logger {
+	logger := log.create_console_logger(.Error)
+	log_level_str := strings.trim_space(env_level)
+
+	switch log_level_str {
+	case "debug":
+		logger = log.create_console_logger(.Debug)
+	case "info":
+		logger = log.create_console_logger(.Info)
+	case "error":
+		logger = log.create_console_logger(.Error)
+	case "warning":
+		logger = log.create_console_logger(.Warning)
+	case "fatal":
+		logger = log.create_console_logger(.Fatal)
+	case "":
+		logger = log.create_console_logger(.Error)
+	case:
+		log.panicf(
+			"invalid log level in the environment variable ODIN_LOG_LEVEL `%s`",
+			log_level_str,
+		)
+	}
+	return logger
+}
+
 main :: proc() {
 	arena: virtual.Arena
 	{
@@ -157,27 +183,7 @@ main :: proc() {
 	}
 	context.temp_allocator = virtual.arena_allocator(&tmp_arena)
 
-	context.logger = log.create_console_logger(.Error)
-	log_level_str := strings.trim_space(os.get_env("ODIN_LOG_LEVEL"))
-	switch log_level_str {
-	case "debug":
-		context.logger = log.create_console_logger(.Debug)
-	case "info":
-		context.logger = log.create_console_logger(.Info)
-	case "error":
-		context.logger = log.create_console_logger(.Error)
-	case "warning":
-		context.logger = log.create_console_logger(.Warning)
-	case "fatal":
-		context.logger = log.create_console_logger(.Fatal)
-	case "":
-		context.logger = log.create_console_logger(.Error)
-	case:
-		log.panicf(
-			"invalid log level in the environment variable ODIN_LOG_LEVEL `%s`",
-			log_level_str,
-		)
-	}
+	context.logger = make_logger_from_env(os.get_env("ODIN_LOG_LEVEL"))
 
 	lib.do_not_wait_for_children()
 

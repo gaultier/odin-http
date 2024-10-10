@@ -1,24 +1,24 @@
 package main
-
 import "core:log"
 import "core:mem"
 import "core:mem/virtual"
 import "core:net"
 import "core:os"
 import "core:strings"
-import "core:sys/kqueue"
+
+import "lib"
 
 MAX_CONCURRENT_CONNECTIONS :: 16384
 
-register_new_client :: proc(queue: kqueue.KQ, socket_client: net.TCP_Socket) {
-	change_list := [1]kqueue.KEvent {
-		{ident = uintptr(socket_client), filter = .Read, flags = {.Add}},
+handle_client :: proc(socket_client: net.TCP_Socket) {
+	pid, err := os.fork()
+	if err != nil {
+		log.panic("failed to fork(2)", err)
 	}
-	n_events, err_kevent := kqueue.kevent(queue, change_list[:], nil, nil)
-	if err_kevent != .NONE {
-		log.panicf("failed to kevent(2) %v", err_kevent)
+
+	if pid > 0 { 	// Parent.
+		return
 	}
-	assert(n_events == 0)
 }
 
 main :: proc() {
@@ -71,6 +71,7 @@ main :: proc() {
 		)
 	}
 
+	lib.do_not_wait_for_children()
 
 	endpoint_server := net.Endpoint {
 		address = net.IP4_Address{0, 0, 0, 0},
@@ -88,72 +89,19 @@ main :: proc() {
 		log.panic("failed to setsockopt(2)", err)
 	}
 
-	if err := net.set_option(socket_server, .Reuse_Port, true); err != nil {
-		log.panic("failed to setsockopt(2)", err)
-	}
-
-	queue, err := kqueue.kqueue()
-	if err != .NONE {
-		log.panicf("failed to kqueue(2) %v", err)
-	}
-
-	{
-		change_list := [1]kqueue.KEvent {
-			{
-				ident  = uintptr(socket_server),
-				filter = .Read,
-				flags  = {.Add},
-				// Backlog.
-				data   = MAX_CONCURRENT_CONNECTIONS,
-			},
+	when ODIN_OS == .FreeBSD {
+		if err := net.set_option(socket_server, .Reuse_Port, true); err != nil {
+			log.panic("failed to setsockopt(2)", err)
 		}
-		n_events, err_kevent := kqueue.kevent(queue, change_list[:], nil, nil)
-		if err_kevent != .NONE {
-			log.panicf("failed to kevent(2) %v", err_kevent)
-		}
-		assert(n_events == 0)
 	}
-
-	event_list := [128]kqueue.KEvent{}
-
 
 	for {
-		n_events, err_kevent := kqueue.kevent(queue, nil, event_list[:], nil)
-		if err_kevent != .NONE {
-			log.panicf("failed to kevent(2) %v", err_kevent)
+		socket_client, endpoint_client, err_accept := net.accept_tcp(socket_server)
+		if err_accept != nil {
+			log.panic("failed to accept(2)", err_accept)
 		}
-		log.debug("events", n_events)
+		log.debug("new client", endpoint_client)
 
-		for event in event_list[:n_events] {
-			event_fd := net.TCP_Socket(event.ident)
-
-			if .Error in event.flags { 	// Error.
-				log.errorf("error %d", event.data)
-				continue
-			} else if .EOF in event.flags { 	// Disconnect
-				log.debug("client disconnected")
-				net.close(event_fd)
-			} else if event_fd == socket_server { 	// New client.
-				socket_client, endpoint_client, err_accept := net.accept_tcp(socket_server)
-				if err_accept != nil {
-					log.panicf("failed to accept(2) %v", err_accept)
-				}
-
-				register_new_client(queue, socket_client)
-				log.debugf("new connection %v", endpoint_client)
-			} else if kqueue.Filter.Read == event.filter {
-				log.debugf("something to read")
-				buf := [1024]u8{}
-				n_recv, err_recv := net.recv_tcp(event_fd, buf[:])
-				if err_recv != nil {
-					log.errorf("failed to recv(2) %v", err_recv)
-					net.close(event_fd)
-					continue
-				}
-				log.debugf("read %d %v", n_recv, buf[:n_recv])
-			} else {
-				log.debugf("unknown event %v", event)
-			}
-		}
+		handle_client(socket_client)
 	}
 }

@@ -18,7 +18,7 @@ register_new_client :: proc(queue: kqueue.KQ, socket_client: net.TCP_Socket) {
 	if err_kevent != .NONE {
 		log.panicf("failed to kevent(2) %v", err_kevent)
 	}
-	assert(n_events == 1)
+	assert(n_events == 0)
 }
 
 main :: proc() {

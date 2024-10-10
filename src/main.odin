@@ -13,6 +13,7 @@ import "lib"
 
 MAX_CONCURRENT_CONNECTIONS :: 16384
 MAX_REQUEST_LENGTH :: 128 * mem.Kilobyte
+MAX_REQUEST_LINES :: 256
 NEWLINE: string : "\r\n"
 
 is_numerical :: proc(s: []u8) -> bool {
@@ -71,7 +72,7 @@ reader_consume_line :: proc(reader: ^Reader) -> (line: []u8, ok: bool) {
 }
 
 reader_read_line :: proc(reader: ^Reader) -> (line: []u8, err: net.Network_Error) {
-	for len(reader.buf) < MAX_REQUEST_LENGTH {
+	for _ in 0 ..< 10 {
 		ok: bool
 		line, ok = reader_consume_line(reader)
 		if ok {
@@ -88,12 +89,16 @@ reader_read_line :: proc(reader: ^Reader) -> (line: []u8, err: net.Network_Error
 
 read_full_request :: proc(reader: ^Reader) -> (request: Request, err: net.Network_Error) {
 	status_line := reader_read_line(reader) or_return
-	log.debugf("status_line", status_line)
+	log.debug("status_line", status_line)
 
 	line := status_line
-	for !bytes.equal(line, transmute([]u8)NEWLINE) {
+	for _ in 0 ..< MAX_REQUEST_LINES {
 		line = reader_read_line(reader) or_return
-		log.debugf("line", line)
+		log.debug("line", line)
+
+		if len(line) == 0 { 	// Reached the end of the lines
+			break
+		}
 	}
 
 	return
@@ -210,7 +215,7 @@ main :: proc() {
 }
 
 @(test)
-test_read_full_request :: proc(_: ^testing.T) {
+test_reader_read_line :: proc(_: ^testing.T) {
 	read_more :: proc(socket: net.TCP_Socket, buf: []u8) -> (n: int, err: net.Network_Error) {
 		data := "GET / HTTP/1.1\r\nHost: 0.0.0.0:12345\r\nUser-Agent: curl/8.6.0\r\nAccept: */*\r\n\r\n"
 		mem.copy(raw_data(buf[:len(data)]), raw_data(transmute([]u8)data), len(data))
@@ -240,4 +245,19 @@ test_read_full_request :: proc(_: ^testing.T) {
 		assert(err == nil)
 		assert(transmute(string)line == "Accept: */*")
 	}
+}
+
+@(test)
+test_reader_full_request :: proc(_: ^testing.T) {
+	read_more :: proc(socket: net.TCP_Socket, buf: []u8) -> (n: int, err: net.Network_Error) {
+		data := "GET / HTTP/1.1\r\nHost: 0.0.0.0:12345\r\nUser-Agent: curl/8.6.0\r\nAccept: */*\r\n\r\n"
+		mem.copy(raw_data(buf[:len(data)]), raw_data(transmute([]u8)data), len(data))
+		return len(data), nil
+	}
+	reader := Reader {
+		read_more = read_more,
+	}
+
+	req, err := read_full_request(&reader)
+	assert(err == nil)
 }

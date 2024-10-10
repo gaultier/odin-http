@@ -66,7 +66,7 @@ reader_consume_line :: proc(reader: ^Reader) -> (line: []u8, ok: bool) {
 	}
 
 	res := reader.buf[reader.idx:][:newline_index]
-	reader.idx = newline_index + len(NEWLINE)
+	reader.idx += newline_index + len(NEWLINE)
 	return res, true
 }
 
@@ -220,7 +220,24 @@ test_read_full_request :: proc(_: ^testing.T) {
 		read_more = read_more,
 	}
 
-	status_line, err := reader_read_line(&reader)
-	assert(err == nil)
-	assert(transmute(string)status_line == "GET / HTTP/1.1")
+	{
+		status_line, err := reader_read_line(&reader)
+		assert(err == nil)
+		assert(transmute(string)status_line == "GET / HTTP/1.1")
+	}
+	{
+		line, err := reader_read_line(&reader)
+		assert(err == nil)
+		assert(transmute(string)line == "Host: 0.0.0.0:12345")
+	}
+	{
+		line, err := reader_read_line(&reader)
+		assert(err == nil)
+		assert(transmute(string)line == "User-Agent: curl/8.6.0")
+	}
+	{
+		line, err := reader_read_line(&reader)
+		assert(err == nil)
+		assert(transmute(string)line == "Accept: */*")
+	}
 }

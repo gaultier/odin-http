@@ -42,46 +42,66 @@ request_find_content_length :: proc(req: []u8) -> (content_length: u64, ok: bool
 	return strconv.parse_u64(transmute(string)header_value)
 }
 
-read_full_request :: proc(socket_client: net.TCP_Socket) {
-	read_buf := make([]u8, MAX_REQUEST_LENGTH)
-	read_buf_real_len := 0
-	content_length: u64 = 0
+Request :: struct {}
 
-	for read_buf_real_len < MAX_REQUEST_LENGTH {
-		n_read, err_read := net.recv_tcp(socket_client, read_buf[read_buf_real_len:len(read_buf)])
-		if err_read != nil {
-			log.panic("failed to recv(2)", err_read)
-		}
-
-		read_buf_real_len += n_read
-
-		content_length = request_find_content_length(read_buf[:read_buf_real_len]) or_continue
-		if content_length > MAX_REQUEST_LENGTH {
-			log.panic("invalid content-length", content_length)
-		}
-	}
-
-	assert(content_length > 0)
-	assert(content_length <= MAX_REQUEST_LENGTH)
-
-
+Reader :: struct {
+	socket: net.TCP_Socket,
+	buf:    [dynamic]u8,
+	idx:    int,
 }
 
-handle_client :: proc(socket_client: net.TCP_Socket) {
-	read_buf := make([]u8, MAX_REQUEST_LENGTH)
-
-	n_read, err_read := net.recv_tcp(socket_client, read_buf[:])
-	if err_read != nil {
-		log.panic("failed to recv(2)", err_read)
+reader_consume_line :: proc(reader: ^Reader) -> (line: []u8, ok: bool) {
+	if reader.idx >= len(reader.buf) {
+		return
 	}
 
-	n_sent, err_sent := net.send_tcp(socket_client, read_buf[:n_read])
-	if err_sent != nil {
-		log.panic("failed to send(2)", err_sent)
-	}
-	log.debug("sent", n_sent)
+	newline_index := bytes.index(reader.buf[reader.idx:], transmute([]u8)NEWLINE)
 
-	os.exit(0)
+	if newline_index == -1 {
+		return
+	}
+
+	reader.idx = newline_index + 1
+	return reader.buf[reader.idx:][:newline_index], true
+}
+
+reader_read_line :: proc(reader: ^Reader) -> (line: []u8, err: net.Network_Error) {
+	for len(reader.buf) < MAX_REQUEST_LENGTH {
+		ok: bool
+		line, ok = reader_consume_line(reader)
+		if ok {
+			return line, nil
+		}
+
+		// Either the buffer does not contain the newline or it is 'empty' so we need to read more.
+		buf: [4096]u8
+		n_read := net.recv_tcp(reader.socket, buf[:]) or_return
+
+		append(&reader.buf, ..buf[:n_read])
+	}
+	return
+}
+
+read_full_request :: proc(reader: ^Reader) -> (request: Request, err: net.Network_Error) {
+	status_line := reader_read_line(reader) or_return
+	log.debugf("status_line", status_line)
+
+	line := status_line
+	for !bytes.equal(line, transmute([]u8)NEWLINE) {
+		line = reader_read_line(reader) or_return
+		log.debugf("line", line)
+	}
+
+	return
+}
+
+handle_client :: proc(socket_client: net.TCP_Socket) -> (err: net.Network_Error) {
+	reader := Reader {
+		socket = socket_client,
+	}
+	read_full_request(&reader) or_return
+
+	return
 }
 
 spawn_client_process :: proc(socket_client: net.TCP_Socket) {
@@ -96,6 +116,7 @@ spawn_client_process :: proc(socket_client: net.TCP_Socket) {
 	}
 
 	handle_client(socket_client)
+	os.exit(0)
 }
 
 main :: proc() {

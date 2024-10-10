@@ -260,4 +260,5 @@ test_reader_full_request :: proc(_: ^testing.T) {
 
 	req, err := read_full_request(&reader)
 	assert(err == nil)
+	_ = req
 }

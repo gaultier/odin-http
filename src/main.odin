@@ -111,7 +111,10 @@ read_full_request :: proc(reader: ^Reader) -> (request: Request, err: net.Networ
 }
 
 
-writer_write_response :: proc(writer: ^Writer) -> net.Network_Error {}
+writer_write_response :: proc(writer: ^Writer) -> (err: net.Network_Error) {
+	// TODO
+	return
+}
 
 handle_client :: proc(socket_client: net.TCP_Socket) -> (err: net.Network_Error) {
 	reader := Reader {
@@ -119,6 +122,10 @@ handle_client :: proc(socket_client: net.TCP_Socket) -> (err: net.Network_Error)
 		read_more = net.recv_tcp,
 	}
 	read_full_request(&reader) or_return
+
+	// FIXME
+	res := "HTTP/1.1 200\r\n\r\n"
+	net.send_tcp(socket_client, transmute([]u8)res)
 
 	return
 }

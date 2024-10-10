@@ -7,6 +7,7 @@ import "core:net"
 import "core:os"
 import "core:strconv"
 import "core:strings"
+import "core:testing"
 
 import "lib"
 
@@ -44,10 +45,13 @@ request_find_content_length :: proc(req: []u8) -> (content_length: u64, ok: bool
 
 Request :: struct {}
 
+Read_Proc :: #type proc(socket: net.TCP_Socket, buf: []u8) -> (n: int, err: net.Network_Error)
+
 Reader :: struct {
-	socket: net.TCP_Socket,
-	buf:    [dynamic]u8,
-	idx:    int,
+	socket:    net.TCP_Socket,
+	read_more: Read_Proc,
+	buf:       [dynamic]u8,
+	idx:       int,
 }
 
 reader_consume_line :: proc(reader: ^Reader) -> (line: []u8, ok: bool) {
@@ -61,8 +65,9 @@ reader_consume_line :: proc(reader: ^Reader) -> (line: []u8, ok: bool) {
 		return
 	}
 
-	reader.idx = newline_index + 1
-	return reader.buf[reader.idx:][:newline_index], true
+	res := reader.buf[reader.idx:][:newline_index]
+	reader.idx = newline_index + len(NEWLINE)
+	return res, true
 }
 
 reader_read_line :: proc(reader: ^Reader) -> (line: []u8, err: net.Network_Error) {
@@ -73,9 +78,8 @@ reader_read_line :: proc(reader: ^Reader) -> (line: []u8, err: net.Network_Error
 			return line, nil
 		}
 
-		// Either the buffer does not contain the newline or it is 'empty' so we need to read more.
 		buf: [4096]u8
-		n_read := net.recv_tcp(reader.socket, buf[:]) or_return
+		n_read := reader.read_more(reader.socket, buf[:]) or_return
 
 		append(&reader.buf, ..buf[:n_read])
 	}
@@ -97,7 +101,8 @@ read_full_request :: proc(reader: ^Reader) -> (request: Request, err: net.Networ
 
 handle_client :: proc(socket_client: net.TCP_Socket) -> (err: net.Network_Error) {
 	reader := Reader {
-		socket = socket_client,
+		socket    = socket_client,
+		read_more = net.recv_tcp,
 	}
 	read_full_request(&reader) or_return
 
@@ -202,4 +207,20 @@ main :: proc() {
 
 		spawn_client_process(socket_client)
 	}
+}
+
+@(test)
+test_read_full_request :: proc(_: ^testing.T) {
+	read_more :: proc(socket: net.TCP_Socket, buf: []u8) -> (n: int, err: net.Network_Error) {
+		data := "GET / HTTP/1.1\r\nHost: 0.0.0.0:12345\r\nUser-Agent: curl/8.6.0\r\nAccept: */*\r\n\r\n"
+		mem.copy(raw_data(buf[:len(data)]), raw_data(transmute([]u8)data), len(data))
+		return len(data), nil
+	}
+	reader := Reader {
+		read_more = read_more,
+	}
+
+	status_line, err := reader_read_line(&reader)
+	assert(err == nil)
+	assert(transmute(string)status_line == "GET / HTTP/1.1")
 }

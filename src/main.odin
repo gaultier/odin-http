@@ -46,6 +46,10 @@ request_find_content_length :: proc(req: []u8) -> (content_length: u64, ok: bool
 
 Request :: struct {}
 
+Response :: struct {
+	status: u16,
+}
+
 Read_Proc :: #type proc(socket: net.TCP_Socket, buf: []u8) -> (n: int, err: net.Network_Error)
 
 Reader :: struct {
@@ -54,6 +58,8 @@ Reader :: struct {
 	buf:       [dynamic]u8,
 	idx:       int,
 }
+
+Writer :: struct {}
 
 reader_consume_line :: proc(reader: ^Reader) -> (line: []u8, ok: bool) {
 	if reader.idx >= len(reader.buf) {
@@ -103,6 +109,9 @@ read_full_request :: proc(reader: ^Reader) -> (request: Request, err: net.Networ
 
 	return
 }
+
+
+writer_write_response :: proc(writer: ^Writer) -> net.Network_Error {}
 
 handle_client :: proc(socket_client: net.TCP_Socket) -> (err: net.Network_Error) {
 	reader := Reader {

@@ -9,8 +9,25 @@ import "core:strings"
 import "lib"
 
 MAX_CONCURRENT_CONNECTIONS :: 16384
+MAX_REQUEST_LENGTH :: 128 * mem.Kilobyte
 
 handle_client :: proc(socket_client: net.TCP_Socket) {
+	read_buf := make([]u8, MAX_REQUEST_LENGTH)
+
+	n_read, err_read := net.recv_tcp(socket_client, read_buf[:])
+	if err_read != nil {
+		log.panic("failed to recv(2)", err_read)
+	}
+
+	n_sent, err_sent := net.send_tcp(socket_client, read_buf[:n_read])
+	if err_sent != nil {
+		log.panic("failed to send(2)", err_sent)
+	}
+	log.debug("sent", n_sent)
+	os.exit(0)
+}
+
+spawn_client_process :: proc(socket_client: net.TCP_Socket) {
 	pid, err := os.fork()
 	if err != nil {
 		log.panic("failed to fork(2)", err)
@@ -19,6 +36,8 @@ handle_client :: proc(socket_client: net.TCP_Socket) {
 	if pid > 0 { 	// Parent.
 		return
 	}
+
+	handle_client(socket_client)
 }
 
 main :: proc() {
@@ -102,6 +121,6 @@ main :: proc() {
 		}
 		log.debug("new client", endpoint_client)
 
-		handle_client(socket_client)
+		spawn_client_process(socket_client)
 	}
 }

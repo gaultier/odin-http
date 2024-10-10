@@ -7,7 +7,6 @@ import "core:net"
 import "core:os"
 import "core:strings"
 import "core:sys/kqueue"
-import "core:time"
 
 MAX_CONCURRENT_CONNECTIONS :: 16384
 
@@ -82,7 +81,15 @@ main :: proc() {
 	// TODO: Make the socket non blocking?
 	socket_server, err_listen := net.listen_tcp(endpoint_server, MAX_CONCURRENT_CONNECTIONS)
 	if err_listen != nil {
-		log.panicf("failed to listen %v", err_listen)
+		log.panic("failed to listen", err_listen)
+	}
+
+	if err := net.set_option(socket_server, .Reuse_Address, true); err != nil {
+		log.panic("failed to setsockopt(2)", err)
+	}
+
+	if err := net.set_option(socket_server, .Reuse_Port, true); err != nil {
+		log.panic("failed to setsockopt(2)", err)
 	}
 
 	queue, err := kqueue.kqueue()
@@ -107,7 +114,8 @@ main :: proc() {
 		assert(n_events == 0)
 	}
 
-	event_list := make([]kqueue.KEvent, MAX_CONCURRENT_CONNECTIONS)
+	event_list := [128]kqueue.KEvent{}
+
 
 	for {
 		n_events, err_kevent := kqueue.kevent(queue, nil, event_list[:], nil)

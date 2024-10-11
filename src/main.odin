@@ -141,12 +141,14 @@ spawn_client_process :: proc(socket_client: net.TCP_Socket) {
 		return
 	}
 
+	// Reset the allocator that may be clobbered with the parent data.
+	free_all(context.temp_allocator)
 	handle_client(socket_client)
 	os.exit(0)
 }
 
 make_logger_from_env :: proc(env_level: string) -> log.Logger {
-	logger := log.create_console_logger(.Error)
+	logger := log.create_console_logger(.Info)
 	log_level_str := strings.trim_space(env_level)
 
 	switch log_level_str {
@@ -174,7 +176,7 @@ make_logger_from_env :: proc(env_level: string) -> log.Logger {
 main :: proc() {
 	arena: virtual.Arena
 	{
-		arena_size := uint(1) * mem.Megabyte
+		arena_size := uint(4) * mem.Kilobyte
 		mmaped, err := virtual.reserve_and_commit(arena_size)
 		if err != nil {
 			log.panicf("failed to mmap %v", err)
@@ -188,7 +190,7 @@ main :: proc() {
 
 	tmp_arena: virtual.Arena
 	{
-		tmp_arena_size := uint(1) * mem.Megabyte
+		tmp_arena_size := uint(4) * mem.Kilobyte
 		tmp_mmaped, err := virtual.reserve_and_commit(tmp_arena_size)
 		if err != nil {
 			log.panicf("failed to create mmap %v", err)
@@ -230,9 +232,11 @@ main :: proc() {
 		if err_accept != nil {
 			log.panic("failed to accept(2)", err_accept)
 		}
-		log.debug("new client", endpoint_client)
+		log.info("new client", endpoint_client, arena.total_used, tmp_arena.total_used)
 
 		spawn_client_process(socket_client)
+
+		free_all(context.temp_allocator)
 	}
 }
 

@@ -1,5 +1,6 @@
 package main
 import "core:bytes"
+import "core:fmt"
 import "core:log"
 import "core:mem"
 import "core:mem/virtual"
@@ -51,15 +52,19 @@ Response :: struct {
 }
 
 Read_Proc :: #type proc(socket: net.TCP_Socket, buf: []u8) -> (n: int, err: net.Network_Error)
+Write_Proc :: #type proc(socket: net.TCP_Socket, buf: []u8) -> (n: int, err: net.Network_Error)
 
 Reader :: struct {
 	socket:    net.TCP_Socket,
-	read_more: Read_Proc,
+	read_proc: Read_Proc,
 	buf:       [dynamic]u8,
 	idx:       int,
 }
 
-Writer :: struct {}
+Writer :: struct {
+	socket:     net.TCP_Socket,
+	write_proc: Write_Proc,
+}
 
 reader_consume_line :: proc(reader: ^Reader) -> (line: []u8, ok: bool) {
 	if reader.idx >= len(reader.buf) {
@@ -86,7 +91,7 @@ reader_read_line :: proc(reader: ^Reader) -> (line: []u8, err: net.Network_Error
 		}
 
 		buf: [4096]u8
-		n_read := reader.read_more(reader.socket, buf[:]) or_return
+		n_read := reader.read_proc(reader.socket, buf[:]) or_return
 
 		append(&reader.buf, ..buf[:n_read])
 	}
@@ -111,21 +116,37 @@ read_full_request :: proc(reader: ^Reader) -> (request: Request, err: net.Networ
 }
 
 
-writer_write_response :: proc(writer: ^Writer) -> (err: net.Network_Error) {
-	// TODO
+writer_write_response :: proc(writer: Writer, res: Response) -> (err: net.Network_Error) {
+	sb := strings.builder_make()
+	fmt.sbprintf(&sb, "HTTP/1.1 %d\r\n", res.status)
+	fmt.sbprint(&sb, "\r\n")
+
+	data := transmute([]u8)strings.to_string(sb)
+	data_idx := 0
+
+	for data_idx < len(data) {
+		n_written := writer.write_proc(writer.socket, data[data_idx:]) or_return
+		data_idx += n_written
+	}
+
 	return
 }
 
 handle_client :: proc(socket_client: net.TCP_Socket) -> (err: net.Network_Error) {
 	reader := Reader {
 		socket    = socket_client,
-		read_more = net.recv_tcp,
+		read_proc = net.recv_tcp,
 	}
 	read_full_request(&reader) or_return
 
-	// FIXME
-	res := "HTTP/1.1 200\r\n\r\n"
-	net.send_tcp(socket_client, transmute([]u8)res)
+	res := Response {
+		status = 200,
+	}
+	writer := Writer {
+		socket     = socket_client,
+		write_proc = net.send_tcp,
+	}
+	writer_write_response(writer, res)
 
 	return
 }
@@ -248,7 +269,7 @@ test_reader_read_line :: proc(_: ^testing.T) {
 		return len(data), nil
 	}
 	reader := Reader {
-		read_more = read_more,
+		read_proc = read_more,
 	}
 
 	{
@@ -281,7 +302,7 @@ test_reader_full_request :: proc(_: ^testing.T) {
 		return len(data), nil
 	}
 	reader := Reader {
-		read_more = read_more,
+		read_proc = read_more,
 	}
 
 	req, err := read_full_request(&reader)

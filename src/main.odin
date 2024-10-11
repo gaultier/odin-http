@@ -246,6 +246,7 @@ main :: proc() {
 
 	for {
 		socket_client, endpoint_client, err_accept := net.accept_tcp(socket_server)
+		if err, ok := err_accept.(net.Accept_Error); ok && u32(err) == 4 {continue}
 		if err_accept != nil {
 			log.panic("failed to accept(2)", err_accept)
 		}

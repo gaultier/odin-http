@@ -152,11 +152,7 @@ handle_client :: proc(socket_client: net.TCP_Socket) -> (err: net.Network_Error)
 }
 
 spawn_client_process :: proc(socket_client: net.TCP_Socket) {
-	pid, err := os.fork()
-	if err != nil {
-		log.panic("failed to fork(2)", err)
-	}
-
+	pid := lib.fork()
 	if pid > 0 { 	// Parent.
 		net.close(socket_client)
 		return

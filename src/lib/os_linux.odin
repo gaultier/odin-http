@@ -13,3 +13,12 @@ _do_not_wait_for_children :: proc() {
 		log.panic("failed to sigaction", err)
 	}
 }
+
+@(private)
+_fork :: proc() -> Pid {
+	pid, err := linux.fork()
+	if err != nil {
+		panic("failed to fork(2)")
+	}
+	return Pid(pid)
+}
